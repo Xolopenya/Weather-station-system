@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: weather_db
+      POSTGRES_USER: weather_user
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U weather_user -d weather_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  data_generator:
+    build: ./data_generator
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: weather_db
+      DB_USER: weather_user
+      DB_PASSWORD: password123
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  redash:
+    image: redash/redash:10.1.0.b50633
+    command: server
+    ports:
+      - "5000:5000"
+    environment:
+      REDASH_LOG_LEVEL: INFO
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://redash_user:redash_password@postgres:5432/redash
+      REDASH_COOKIE_SECRET: "my-secret-key-2026"
+      REDASH_SECRET_KEY: "my-secret-key-2026"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  redash_scheduler:
+    image: redash/redash:10.1.0.b50633
+    command: scheduler
+    environment:
+      REDASH_LOG_LEVEL: INFO
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://redash_user:redash_password@postgres:5432/redash
+      REDASH_COOKIE_SECRET: "my-secret-key-2026"
+      REDASH_SECRET_KEY: "my-secret-key-2026"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  redash_worker:
+    image: redash/redash:10.1.0.b50633
+    command: worker
+    environment:
+      REDASH_LOG_LEVEL: INFO
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://redash_user:redash_password@postgres:5432/redash
+      REDASH_COOKIE_SECRET: "my-secret-key-2026"
+      REDASH_SECRET_KEY: "my-secret-key-2026"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  jupyter:
+    image: quay.io/jupyter/scipy-notebook:latest
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+    command: start-notebook.py --NotebookApp.token='my-token'
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
